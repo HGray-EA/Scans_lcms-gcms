@@ -1,0 +1,30 @@
+phase 1, lab scan lcms, gcms. 
+	Scan compares compounds.
+		"semi-quant"
+	limit of detection. 
+
+How does "semi-quant" correlate with "full-quant". 
+
+decrease within year samples, chemicals. 
+
+Purpose is to decrease the quantity of samples in "scans" so we could then do more scans over a larger area.
+
+Only monitor chems at 20% of sites. Scans typically used for emerging chemicals. 
+
+September-
+ What's temporal variability at spatial site.
+ What's the spatial variability.
+
+Visualise scans data. 
+
+Deadline -
+end of August, high priority.
+
+Source of data - 
+Data is in text field in WIMS. Data in CANARY. Zac tried to get access. 
+
+Luke Holmes, CSG has analysed scans data. Send code. He helps us to access, on leave before 6th of August. 
+
+Mike Nelson, checkin with Mike halfway through August.
+
+Eleanor happy to support. Angus, Harry. 
