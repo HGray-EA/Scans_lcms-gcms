@@ -21,9 +21,20 @@ setwd("C:/Users/hg000051/Downloads/")
   Tgt_Screening_LCMS <- readtsv("LCMS Target Screening detections raw data 2025-08-08.tsv")
   EA_NLS_Target_LCMS <- readtsv("LCMS EA NLS Target Database 2025-08-08.tsv")
 
+# LC/GC-MS library
+  LCGC_Lib <- readxl::read_excel("Combined GCMS  LCMS Database MAY 2025.xlsx", skip=2) %>% 
+      rename("Compound_Name" ="...1" ,
+               "CAS#" = "...2",
+             "Description" = "...3",
+             "GCMS_LOD" = "GC-MS",
+             "LCMS_LOD" = "LC-MS",
+             "Added_LC" = "...6",
+             "Added_GC" = "...7")
+  
+  
 #RSN sites
   RSN_Sites <- readxl::read_excel("RSN_Site_Locations_PBI_Download.xlsx")
-
+  
 # Explore
   GCMS_Open_Tgt %>% skim()
   
@@ -39,16 +50,27 @@ setwd("C:/Users/hg000051/Downloads/")
   
 # Confirm if site ids match
   
-  Open_Tgt_sf %>% 
+ RSN_MS <-  Open_Tgt_sf %>% 
     filter(str_detect(Sample_Site_ID, "RSN"))
+
+# Identify which library compounds we didn't find on the RSN network
+ # Do we need to screen for these?
   
-# Visualise
+  Comps_exc <-  LCGC_Lib %>% 
+          filter(!Compound_Name %in%  RSN_MS$Compound_Name)
   
-  Open_Tgt %>% 
-    filter(str_detect(Sample_Site_ID, "RSN")) %>% 
-    leaflet() %>% 
-    addProviderTiles(providers$Esri) %>% 
-    addCircleMarkers(radius = 3, color = "seagreen2")
+  Comps_exc %>% distinct()  # list of compounds on the library but not found in the environment.
+  
+# Identify how many compounds are found at RSN sites by LCMS methods vs GCMS.
+  
+  RSN_MS %>% 
+    group_by(Sample_Site_ID) %>% 
+    distinct(Sample_Site_ID, Compound_Name, method) %>% 
+    mutate(Detected = TRUE) %>% 
+  pivot_wider(names_from = method, values_from = Detected, values_fill = FALSE)
+  
+# Identify if there are any national trends
   
   
+ 
   
