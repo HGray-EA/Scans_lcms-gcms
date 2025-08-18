@@ -31,20 +31,20 @@ library(tidylog)
 # Function which reads tsv
   readtsv <- function(filepath){
     
-    read.table(paste0("C:/Users/hg000051/Downloads/",filepath), sep = '\t', header =T)
+    read.table(paste0("/dbfs/mnt/lab/unrestricted/harry.gray@environment-agency.gov.uk/SEDA_Analysis/",filepath), sep = '\t', header =T)
   }
 
 # Load in data files from CANARY. Are these all the files I need, not sure
-  Tgt_Screening_GCMS <- readtsv("GCMS Target Screening detections raw data 2025-08-08.tsv")
-  EA_NLS_Target_GCMS <- readtsv("GCMS EA NLS Target Database 2025-08-08.tsv")
-  GCMS_Open_Tgt <- readtsv("GCMS Target and Non-Targeted Screening for Open Data (detes 3106 7299 4994) 2025-08-08.tsv")
+  Tgt_Screening_GCMS <- readtsv("GCMS_Target_Screening_detections_raw_data_2025_08_08.tsv")
+  EA_NLS_Target_GCMS <- readtsv("GCMS_EA_NLS_Target_Database_2025_08_08.tsv")
+  GCMS_Open_Tgt <- readtsv("GCMS_Target_and_Non_Targeted_Screening_for_Open_Data__detes_3106_7299_4994__2025_08_08.tsv")
   
-  LCMS_Open_Tgt <- readtsv("LCMS Target and Non-Targeted Screening for Open Data (detes 3106 7299 4994) 2025-08-08.tsv")  
-  Tgt_Screening_LCMS <- readtsv("LCMS Target Screening detections raw data 2025-08-08.tsv")
-  EA_NLS_Target_LCMS <- readtsv("LCMS EA NLS Target Database 2025-08-08.tsv")
+  LCMS_Open_Tgt <- readtsv("LCMS_Target_and_Non_Targeted_Screening_for_Open_Data__detes_3106_7299_4994__2025_08_08.tsv")  
+  Tgt_Screening_LCMS <- readtsv("LCMS_Target_Screening_detections_raw_data_2025_08_08.tsv")
+  EA_NLS_Target_LCMS <- readtsv("LCMS_EA_NLS_Target_Database_2025_08_08.tsv")
 
 # LC/GC-MS library
-  LCGC_Lib <- readxl::read_excel("C:/Users/hg000051/Downloads/Combined GCMS  LCMS Database MAY 2025.xlsx", skip=2) %>% 
+  LCGC_Lib <- readxl::read_excel("/dbfs/mnt/lab/unrestricted/harry.gray@environment-agency.gov.uk/SEDA_Analysis/Combined_GCMS__LCMS_Database_MAY_2025.xlsx", skip=2) %>% 
       rename("Compound_Name" ="...1" ,
                "CAS#" = "...2",
              "Description" = "...3",
@@ -55,7 +55,7 @@ library(tidylog)
   
   
 #Load RSN sites
-  RSN_Sites <- readxl::read_excel("C:/Users/hg000051/Downloads/RSN_Site_Locations_PBI_Download.xlsx")
+  RSN_Sites <- readxl::read_excel("/dbfs/mnt/lab/unrestricted/harry.gray@environment-agency.gov.uk/SEDA_Analysis/Site_locations__showing_current_status_.xlsx", skip =2)
 ```
 
 
@@ -132,25 +132,35 @@ The below plot shows the seasonal variation in the log of the concentration thro
   
   RSN_MS$season <- factor(RSN_MS$season, levels = c("Winter", "Spring", "Summer", "Autumn"))
   
-  ggplot(RSN_MS, aes(x = season, y =logConc, fill=season))+
+ plt <-  ggplot(RSN_MS, aes(x = season, y =logConc, fill=season))+
     geom_violin() + geom_boxplot(width=0.3)+labs(title = "Concentraion by Season")
 
-
+ plotly::ggplotly(plt)
 ```
 
 The below heatmap shows the spatial variation of concentration for all compounds within England. This map shows there is temporal variation.  
 
 ```{r, map }
-#| eval: false
+
   
-  pal <- MetBrewer::met.brewer("Peru1", type="continuous")
+  met_hex <- MetBrewer::met.brewer("Peru1", direction = -1) %>% 
+                    as.character()
   
+  pal <- colorNumeric(palette = met_hex, domain = RSN_MS$logConc)
+
   leaflet::leaflet(RSN_MS) %>% 
     addProviderTiles(providers$Esri) %>% 
-    addCircleMarkers(fillColor = pal, 
+    addCircleMarkers(fillColor = ~pal(logConc), 
                      color = NA,
-                     radius = 3,
-                     fillOpacity = 1) 
+                     radius = 5,
+                     fillOpacity = 1, 
+                     popup = paste0("Site: ", RSN_MS$SMPT_LONG_NAME,"<br>",
+                                    "log(Conc): ", RSN_MS$logConc, " ug/L")
+                      ) %>% 
+                      addLegend("bottomright",
+                                pal = pal,
+                                values = RSN_MS$logConc,
+                                title = "All Compounds log-concentration")
 
 ```    
 
