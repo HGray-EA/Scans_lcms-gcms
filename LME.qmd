@@ -1,0 +1,240 @@
+---
+title: "Emerging Chemicals Scans LC/GC Mass Spectrometry Analysis"
+format:
+  html: 
+    theme: flatly 
+    toc: true
+    toc-location: right
+---
+## Introduction
+"Scans" data was pulled from CANARY, this includes LCMS and GCMS data, sites from the RSN network with "scans" data were selected for analysis.
+
+"Scans" data includes emerging chemicals (such as flame retardants, anti-depressants etc) these compounds aren't monitored for using conventional water quality sondes but can be identified through mass spectrometry lab analysis. A broad suite of these compounds are sampled across the RSN network, however we have little understanding whether there is more financial merit to be had from monitoring at the existing temporal frequency of monthly or to reduce the temporal frequency of monitoring but increase the spatial extent of monitoring for these compounds.
+
+Here we aim to understand can the variation around the mean concentration of scans data (for all compounds grouped together) be best described by frequency of sampling (temporal var) or spatially.
+
+Environmental monitoring data is typically not normally distributed and site selection is commonly nested (monitoring sites in the same catchment), so we use a mixed effect model to accommodate for these.
+
+```{r, data load}
+#| warning: false
+#| echo: false
+#| code-fold: true
+
+library(tidyverse)
+library(skimr)
+library(leaflet)
+library(sf)
+library(magrittr)
+library(lme4)
+library(tidylog)
+
+# Function which reads tsv
+  readtsv <- function(filepath){
+    
+    read.table(paste0("C:/Users/hg000051/Downloads/",filepath), sep = '\t', header =T)
+  }
+
+# Load in data files from CANARY. Are these all the files I need, not sure
+  Tgt_Screening_GCMS <- readtsv("GCMS Target Screening detections raw data 2025-08-08.tsv")
+  EA_NLS_Target_GCMS <- readtsv("GCMS EA NLS Target Database 2025-08-08.tsv")
+  GCMS_Open_Tgt <- readtsv("GCMS Target and Non-Targeted Screening for Open Data (detes 3106 7299 4994) 2025-08-08.tsv")
+  
+  LCMS_Open_Tgt <- readtsv("LCMS Target and Non-Targeted Screening for Open Data (detes 3106 7299 4994) 2025-08-08.tsv")  
+  Tgt_Screening_LCMS <- readtsv("LCMS Target Screening detections raw data 2025-08-08.tsv")
+  EA_NLS_Target_LCMS <- readtsv("LCMS EA NLS Target Database 2025-08-08.tsv")
+
+# LC/GC-MS library
+  LCGC_Lib <- readxl::read_excel("C:/Users/hg000051/Downloads/Combined GCMS  LCMS Database MAY 2025.xlsx", skip=2) %>% 
+      rename("Compound_Name" ="...1" ,
+               "CAS#" = "...2",
+             "Description" = "...3",
+             "GCMS_LOD" = "GC-MS",
+             "LCMS_LOD" = "LC-MS",
+             "Added_LC" = "...6",
+             "Added_GC" = "...7")
+  
+  
+#Load RSN sites
+  RSN_Sites <- readxl::read_excel("C:/Users/hg000051/Downloads/RSN_Site_Locations_PBI_Download.xlsx")
+```
+
+
+```{r, transforms}  
+#| code-fold: true
+
+# Transform 
+ # names(LCMS_Open_Tgt)==names(GCMS_Open_Tgt) check colnames are the same before rbind
+  
+# Merge LCMS & GCMS data into one dataframe
+  Open_Tgt <- rbind(LCMS_Open_Tgt, GCMS_Open_Tgt)
+  
+# Convert to sf for leaflet map later
+  Open_Tgt_sf <- Open_Tgt %>% st_as_sf(coords = c("Longitude","Latitude"), crs=4326)
+  RSN_Sites_sf <- RSN_Sites %>% st_as_sf(coords = c("GRTS longitude (WGS84)","GRTS latitude (WGS84)"), crs=4326)
+  
+# Confirm if site ids match
+# Extract month and year for temporal variance and log concentration for normality.
+
+# Select scans sites from RSN network only  
+  RSN_MS <-  Open_Tgt_sf %>% 
+    filter(str_detect(Sample_Site_ID, "RSN"))
+  
+    RSN_MS %<>% 
+    mutate(
+      month = as.factor(month(Sample_datetime)),
+      season = case_when(
+               month %in% c(3,4,5) ~ "Spring",
+               month %in% c(6,7,8) ~ "Summer",
+               month %in% c(9,10,11) ~ "Autumn",
+               month %in% c(12,1,2) ~ "Winter"),
+      logConc = log(Concentration)
+    )
+```
+
+
+
+## Exploratory analysis
+
+We will first explore whether our concentration data is normally distributed, as this will impact the statistical models we can use.
+
+:::{panel-tabset}
+
+## Concentration histogram
+```{r, conc data}
+#| warning: false
+#| echo: false
+
+ # Observe concentration normality- large right tail
+  ggplot(RSN_MS, aes(x = Concentration)) +
+         geom_histogram(aes(y = ..density..), bins = 50) +
+         geom_density(color = "seagreen2", size = 1)
+
+  
+```
+
+## Log concentration histogram
+```{r, log conc}
+#| warning: false
+#| echo: false
+  
+  ggplot(RSN_MS, aes(x = logConc)) +
+    geom_histogram(aes(y = ..density..), bins = 50) +
+    geom_density(color = "seagreen2", size = 1)
+```
+
+:::
+
+The below plot shows the seasonal variation in the log of the concentration through the seasons- summer and autumn have a median concentration higher than winter and spring. There is a temporal variation in concentration. 
+
+```{r, EDA}
+# Visualise   
+ 
+  
+  RSN_MS$season <- factor(RSN_MS$season, levels = c("Winter", "Spring", "Summer", "Autumn"))
+  
+  ggplot(RSN_MS, aes(x = season, y =logConc, fill=season))+
+    geom_violin() + geom_boxplot(width=0.3)+labs(title = "Concentraion by Season")
+
+
+```
+
+The below heatmap shows the spatial variation of concentration for all compounds within England. This map shows there is temporal variation.  
+
+```{r, map }
+#| eval: false
+  
+  pal <- MetBrewer::met.brewer("Peru1", type="continuous")
+  
+  leaflet::leaflet(RSN_MS) %>% 
+    addProviderTiles(providers$Esri) %>% 
+    addCircleMarkers(fillColor = pal, 
+                     color = NA,
+                     radius = 3,
+                     fillOpacity = 1) 
+
+```    
+
+```{r, heatmap}
+  leaflet::leaflet(RSN_MS) %>% 
+    addProviderTiles(providers$Esri) %>% 
+    leaflet.extras::addHeatmap(intensity =~logConc,
+                               blur=30, radius=20)
+
+```
+
+## Statistical modelling
+
+Now we know there is both spatial and temporal variation, can we test which has the most impact on concentration of the "scans" compounds.
+
+Below we use a random effect mixed model, whereby we let each site have a random intercept `r (1|Sample_Site_ID)`, so each site can start at a given concentration but the trend for that site is the same across all sites (fixed). 
+
+We do the same for season.
+
+```{r, LMM}
+#| code-fold: true
+
+ lme1 <- lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1| season), data=RSN_MS)
+  summary(lme1)
+ # residuals explains more than spatial or temporal - what we can't account for. 
+ # Spaital explains ~double the amount of variance than temporal. 
+ # lets try month instead of season to bring the residuals down and explain the intra-season varation better.
+ # explains marginally more. So seasons is good enough, our residuals still stay high when 
+ # we account for variance between months.
+ 
+ plot(fitted(lme1), resid(lme8))
+ abline(h = 0, col="red")
+ # some heteroscadacity 
+ 
+ qqnorm(resid(lme1))
+ qqline(resid(lme1), col="red")
+ 
+ 
+```
+
+The model here shows that sites explain more variance from mean log(concentration) than seasons. but that our model fit is quite poor because we have high residuals - variance during the season and between sites is high. 
+
+We also have heterscadacity on our model which shows it's baised independence?
+
+
+```{r,}
+# test for between month 
+#| code-fold: true
+ lme2 <- lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1 | month), data = RSN_MS)
+ summary(lme2)
+ 
+```
+
+Month explains slightly more variance than seasonally but is still less than spatial variance. 
+
+```{r, anova model comparison}
+#| code-fold: true
+
+anova(lme1, lme2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

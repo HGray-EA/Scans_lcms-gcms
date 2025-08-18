@@ -3,6 +3,7 @@ library(skimr)
 library(leaflet)
 library(sf)
 library(magrittr)
+library(lme4)
 
 setwd("C:/Users/hg000051/Downloads/")
 
@@ -73,20 +74,71 @@ setwd("C:/Users/hg000051/Downloads/")
                month %in% c(3,4,5) ~ "Spring",
                month %in% c(6,7,8) ~ "Summer",
                month %in% c(9,10,11) ~ "Autumn",
-               month %in% c(12,1,2) ~ "Winter"
-      ),
+               month %in% c(12,1,2) ~ "Winter"),
       logConc = log(Concentration)
-    )
+    ) %>% 
+    filter(!is.na(logConc))
  
- # Test to see if temporal variability is statistically significant and see how it compares to spatial variability 
+# Visualise   
+  # Concentration will vary between sites.
+  
+  RSN_MS$season <- factor(RSN_MS$season, levels = c("Winter", "Spring", "Summer", "Autumn"))
+  
+  ggplot(RSN_MS, aes(x = season, y =logConc, fill=season))+
+    geom_violin() + geom_boxplot(width=0.3)+labs(title = "Concentraion by Season")
 
+  pal <- MetBrewer::met.brewer("Peru1", type="continuous")
+  
+  leaflet::leaflet(RSN_MS) %>% 
+    addProviderTiles(providers$Esri) %>% 
+    addCircleMarkers(fillColor = pal, 
+                     color = NA,
+                     radius = 3,
+                     fillOpacity = 1) 
+    
+  leaflet::leaflet(RSN_MS) %>% 
+    addProviderTiles(providers$Esri) %>% 
+    leaflet.extras::addHeatmap(intensity =~logConc,
+                               blur=30, radius=20)
  
-  lme1 <- lmer(logConc ~ 1 + (1 | Sample_Site_ID), data = RSN_MS)
+  
+  
+  
+  lme <- 
+    lmer(logConc ~ month + (1 | Sample_Site_ID), data = RSN_MS)
+  lme
+  
+  coef(lme)$Sample_Site_ID
+  # Fix the 
+  lmef <- lmer(logConc ~ month + (month | Sample_Site_ID), data=RSN_MS)
+  
+  # Fix season, but for each site allow seasonality to vary.
+  summary(lmef)
+  coef(lmef)$Sample_Site_ID
+   # slope coefficients are the same per site for each month.
+ # Test to see if temporal variability is statistically significant and see how it compares to spatial variability 
+ # Site is our random effect
+ 
+  
+  
+  
+  lme1 <- 
+    lmer(logConc ~ (1 | Sample_Site_ID), data = RSN_MS)
   lme1
  
-  # Add seasonality as an effect instead of just spatial. 
- lme2 <- lme4::lmer(logConc ~ 1 + (1| Sample_Site_ID) + (1 + season), data = RSN_MS)
+  # Add seasonality as an random effect instead of just spatial. 
+ lme2 <- lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1 + season), data = RSN_MS)
  lme2
+ # season and sites are both random. How much of variation in conc is due to season or temp
+ # average seasonal difference across sites but preventing them from varying by site.
+ # Assumes all sites respond to seasons in the same way
+ 
+ lme2 <- lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1 | season), data = RSN_MS)
+ lme2
+ # (1| between site variation), (1| between season variation) residuals are within-site or within-season unexplained variation
+ 
+ summary(lme2)
+ 
  # spring and winter have notably lower concs -0.30 ish whilst summer is 0.03 different to autumn. 
  
  anova(lme1,lme2)
@@ -95,27 +147,70 @@ setwd("C:/Users/hg000051/Downloads/")
  # Try seasonality as random effect 
  
  # Add seasonality as a random effect instead of just spatial. 
- lme2r <- lme4::lmer(logConc ~ 1 + (1| Sample_Site_ID) + (1 | season), data = RSN_MS)
- lme2r
+ lme2r <- lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1 | season), data = RSN_MS)
+ lme2r  # can remove the 1 here
  
  # residuals explains more than spatial or temporal - what we can't account for. 
  # Spaital explains ~double the amount of variance than temporal. 
+ # lets try month instead of season to bring the residuals down and explain the intra-season varation better.
+ # explains marginally more. So seasons is good enough, our residuals still stay high when 
+ # we account for variance between months.
  
- lme3 <- lme4::lmer(logConc ~ 1 + (1| Sample_Site_ID) + (1 | month), data = RSN_MS)
+ lme3 <- lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1 | month), data = RSN_MS)
  lme3
+ 
  
  # Resid 1.693
  # concs rise in summer/ autumn months.
-
- anova(lme2,lme3)
+ 
+ # Above only allowed random intercept but fixes slopes, lets allow random slopes to better
+ # capture site-specific season response.
+ 
+ lme4 <- lme4::lmer(logConc ~ season + (season|Sample_Site_ID), data= RSN_MS)
+ lme4
+ # doesn't bring residuals down.
+ 
+ 
+ lme5 <- lme4::lmer(logConc ~ season * year + (1 | Sample_Site_ID), data= RSN_MS)
+ # fix year for the 4 years we have as only have a few. 
+ 
+ # year doesn't do much - there's more variance between sites and seasons than seasons and years.
+ 
+ anova(lme4,lme5)
+ 
+ # lets do between catchments.
+ 
+ 
+ 
+ lme6 <- lme4::lmer(logConc ~ season + (1 | Sample_Site_ID) + (1| ARE_DESC), data= RSN_MS)
+ 
+ anova(lme4, lme6)
+ 
+ lme7 <- lme4::lmer(logConc ~ season + (1| Sample_Site_ID), data=RSN_MS)
+ 
+ anova(lme6, lme7)
  # 
  
  # Should probably group by determinand group, like pesticide, PFAS etc.
  
+ lme8 <- lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1| season), data=RSN_MS)
+ 
+ 
+ plot(fitted(lme8), resid(lme8))
+ abline(h = 0, col="red")
+ # some heteroscadacity 
+ 
+ qqnorm(resid(lme8))
+ qqline(resid(lme8), col="red")
  
  
  
+ 
+ 
+ lme9 <- lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1| season) + (1|OPCAT_NAME), data=RSN_MS)
  # ICC after 
+ 
+ # Use ICC to look at intragroup variability and compare against intergroup variability.
  
  vc <- as.data.frame(VarCorr(lme2r))
  total_var <- sum(vc$vcov)
@@ -155,9 +250,25 @@ setwd("C:/Users/hg000051/Downloads/")
     # View ICC table
     icc_table
   # More site variance explained than seasonal still, checks out.
+    
   # temp variation is halved when using seasons to compare temporal variability. Meaning variability between months inside a season gets lost. 
  # seasonal monitoring would miss within month variability. 
  
+    
+    #Q - IDENTIFY IF BIMONTHLY OR SEASONALLY IS STATITICALLY SIGNIFICANT.
+    # Q - temporal variability isn't 0 so has some impact, could sample some sites montlhy and others seasonally.
+    #       filter out monitoring sites to be bi-monthly to simulate this monitoring, what effect does it have?
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 # Identify which library compounds we didn't find on the RSN network
  # Do we need to screen for these?
   
