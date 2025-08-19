@@ -99,7 +99,7 @@ We will first explore whether our concentration data is normally distributed, as
 
 :::{panel-tabset}
 
-## Concentration histogram
+### Concentration histogram
 ```{r, conc data}
 #| warning: false
 #| echo: false
@@ -112,7 +112,7 @@ We will first explore whether our concentration data is normally distributed, as
   
 ```
 
-## Log concentration histogram
+### Log concentration histogram
 ```{r, log conc}
 #| warning: false
 #| echo: false
@@ -124,7 +124,9 @@ We will first explore whether our concentration data is normally distributed, as
 
 :::
 
-The below plot shows the seasonal variation in the log of the concentration through the seasons- summer and autumn have a median concentration higher than winter and spring. There is a temporal variation in concentration. 
+
+## Temporal and Spatial Variation
+The below plot shows the seasonal variation in the log of concentration for all compounds through the seasons- summer and autumn have a median concentration higher than winter and spring. This shows there is a temporal variation in concentration of all compounds when grouped together. 
 
 ```{r, EDA}
 # Visualise   
@@ -137,6 +139,30 @@ The below plot shows the seasonal variation in the log of the concentration thro
 
  plotly::ggplotly(plt)
 ```
+
+```{r, shiny input}
+
+selectInput("Comp", "Select Compound", choices= unique(RSN_MS$Compound_Name))
+```
+
+
+```{r, Temporal trend of a given compound}
+#| context: server
+
+filt_dat = reactive({
+                  RSN_MS[RSN_MS$Compound_Name == input$Comp,] 
+                    })
+ 
+output$plt <- renderPlot({
+              
+ggplot(filt_dat, aes(x = as.factor(season), y = logConc, fill=season))+
+ geom_violin() + geom_boxplot(width=0.3)+labs(title = paste0("Concentraion by Season", input$Comp))
+
+})
+
+
+```
+
 
 The below heatmap shows the spatial variation of concentration for all compounds within England. This map shows there is temporal variation.  
 
@@ -203,7 +229,7 @@ We do the same for season.
 
 The model here shows that sites explain more variance from mean log(concentration) than seasons. but that our model fit is quite poor because we have high residuals - variance during the season and between sites is high. 
 
-We also have heterscadacity on our model which shows it's baised independence?
+We also have heterscadacity on our model which shows it's biased independence?
 
 
 ```{r,}
