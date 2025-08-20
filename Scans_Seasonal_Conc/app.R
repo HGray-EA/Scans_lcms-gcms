@@ -3,6 +3,7 @@ library(bslib)
 library(ggplot2)
 library(plotly)
 library(dplyr)
+library(brickster)
 
 
 # Load in data and transform 
@@ -46,12 +47,15 @@ RSN_MS %<>%
     logConc = log(Concentration)
   )
 
+# Order for plotting 
+RSN_MS$season <- factor(RSN_MS$season, levels = c("Winter", "Spring", "Summer", "Autumn"))
 
 #-----------------------------------------------------------------------------#
 
 ui <- page_sidebar(
-  title = "Compound Concentration Analysis",
+  title = "Scans Compound Seasonality",
   sidebar = sidebar(
+        width = 300,
     selectInput(
       "compound",
       "Select Compound:",
@@ -68,24 +72,23 @@ ui <- page_sidebar(
 #-----------------------------------------------------------------------------#
 
 server <- function(input, output, session) {
-  # Reactive data filtering based on selected compound
+# Reactive data filtering based on selected compound
   filtered_data <- reactive({
     RSN_MS %>%
       filter(Compound_Name == input$compound)
   })
   
   output$concentration_plot <- renderPlotly({
-    # Create the ggplot
-    plt <- ggplot(filtered_data(), aes(x = season, y = logConc, fill = season)) +
-      geom_violin() + 
-      labs(
-        title = paste("Concentration by Season -", input$compound),
-        x = "Season",
-        y = "Log Concentration"
-      ) +
-      theme_minimal()
+   
+# Create the ggplot
+  plt <-   ggplot(filtered_data(), aes(season, logConc, fill = season)) +
+      ggdist::stat_halfeye(adjust = .5, width = .6, .width = 0, justification = -.3, fill = "skyblue") +
+      geom_boxplot(width = .15, outlier.shape = NA) +
+      geom_jitter(width = .1, alpha = 0.5)+
+      labs(y = "log(Concentration [ug/L])", x= "Season")
     
-    # Convert to plotly
+    
+# Convert to plotly
     ggplotly(plt)
   })
 }
