@@ -7,7 +7,7 @@ format:
     toc-location: right
 ---
 ## Introduction
-"Scans" data was pulled from CANARY, this includes LCMS and GCMS data, sites from the RSN network with "scans" data were selected for analysis.
+Targetted Screening  data was pulled from CANARY, this includes LCMS and GCMS data, sites from the RSN network with "scans" data were selected for analysis.
 
 "Scans" data includes emerging chemicals (such as flame retardants, anti-depressants etc) these compounds aren't monitored for using conventional water quality sondes but can be identified through mass spectrometry lab analysis. A broad suite of these compounds are sampled across the RSN network, however we have little understanding whether there is more financial merit to be had from monitoring at the existing temporal frequency of monthly or to reduce the temporal frequency of monitoring but increase the spatial extent of monitoring for these compounds.
 
@@ -140,29 +140,7 @@ The below plot shows the seasonal variation in the log of concentration for all 
  plotly::ggplotly(plt)
 ```
 
-```{r, shiny input}
-
-selectInput("Comp", "Select Compound", choices= unique(RSN_MS$Compound_Name))
-```
-
-
-```{r, Temporal trend of a given compound}
-#| context: server
-
-filt_dat = reactive({
-                  RSN_MS[RSN_MS$Compound_Name == input$Comp,] 
-                    })
- 
-output$plt <- renderPlot({
-              
-ggplot(filt_dat, aes(x = as.factor(season), y = logConc, fill=season))+
- geom_violin() + geom_boxplot(width=0.3)+labs(title = paste0("Concentraion by Season", input$Comp))
-
-})
-
-
-```
-
+`
 
 The below heatmap shows the spatial variation of concentration for all compounds within England. This map shows there is temporal variation.  
 
@@ -205,6 +183,38 @@ Now we know there is both spatial and temporal variation, can we test which has 
 Below we use a random effect mixed model, whereby we let each site have a random intercept `r (1|Sample_Site_ID)`, so each site can start at a given concentration but the trend for that site is the same across all sites (fixed). 
 
 We do the same for season.
+
+
+```{r}
+
+# Isolate to 4 compounds to test
+#Bioavailable zinc (det code 4822)
+#Perfluorooctanesulphonate anion (PFOS) (det code 9276)
+#Cypermethrin (det code 0073)
+#Tributyltin (TBT) (det code 8944)
+#17-alpha-ethinyloestradiol (EE2) (det code 9899)
+
+# From these compounds, only PFOS exists in the canary target screening data.
+
+
+RSN_MS$cens <- ifelse(
+                      LCGC_Lib == 'Detected',
+                      mod_dat$trans_response,
+                      transform_response(min(mod_dat$response)/10000)
+                    ) 
+
+mod1 <- RSN_MS %>%
+              gam(matrix(c(logConc, cens, ncol=2)~1 + year + s(rsn_id_fact, bs='re') + 
+              s(doy, bs='cc', k=12) +
+              te(SMPT_EASTING, SMPT_NORTHING) + 
+              family = cnorm(link = "identity")))
+
+summary(mod1)
+
+gam.check(mod1)
+dev.off()
+```
+
 
 ```{r, LMM}
 #| code-fold: true
