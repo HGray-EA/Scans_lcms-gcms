@@ -180,10 +180,83 @@ The below heatmap shows the spatial variation of concentration for all compounds
 
 Now we know there is both spatial and temporal variation, can we test which has the most impact on concentration of the "scans" compounds.
 
-Below we use a random effect mixed model, whereby we let each site have a random intercept `r (1|Sample_Site_ID)`, so each site can start at a given concentration but the trend for that site is the same across all sites (fixed). 
+Below we use a random effect mixed model, whereby we let each site have a random intercept`, so each site can start at a given concentration but the trend for that site is the same across all sites (fixed). 
 
 We do the same for season.
 
+
+## Selecting Compounds to represent wider dataset
+
+Sources: 
+
+Pathways: 
+
+Receptors: 
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+
+# 1. Start dates for compounds
+compound_start <- LCGC_Lib %>%
+  mutate(across(c(Added_LC, Added_GC), ymd)) %>%
+  rowwise() %>%
+  mutate(
+    start_date = min(c_across(c(Added_LC, Added_GC)), na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    start_date = if_else(is.infinite(start_date), ymd("1900-01-01"), start_date)
+  ) %>%
+  select(Compound_Name, start_date)
+
+# 2. Filter site of interest
+site_id <- "RSN0018"
+site_dates <- RSN_MS %>%
+  filter(Sample_Site_ID == site_id) %>%
+  distinct(Date)
+
+# 3. Full grid: all sampled-for compounds × all dates at this site
+full_grid <- compound_start %>%
+  crossing(site_dates) %>%
+  mutate(Sample_Site_ID = site_id)
+
+# 4. Join actual measurements
+RSN_MS_full <- full_grid %>%
+  left_join(RSN_MS, by = c("Compound_Name", "Date", "Sample_Site_ID")) %>%
+  mutate(
+    not_detected = case_when(
+      Date < start_date ~ NA,           # before compound was added
+      is.na(Concentration) ~ TRUE,     # no detection
+      TRUE ~ FALSE                      # detected
+    )
+  )
+
+# 1. Compute compound-specific minimums
+compound_mins <- RSN_MS %>%
+  group_by(Compound_Name) %>%
+  summarise(min_conc = min(Concentration, na.rm = TRUE) / 10000, .groups = "drop")
+
+# 2. Fill in non-detected concentrations and compute logConc per compound
+RSN_MS_full <- RSN_MS_full %>%
+  left_join(compound_mins, by = "Compound_Name") %>%
+  mutate(
+    Concentration = if_else(
+      not_detected == TRUE & Date >= start_date,
+      min_conc,
+      Concentration
+    ),
+    logConc = if_else(
+      not_detected == TRUE & Date >= start_date,
+      log(Concentration),
+      logConc
+    )
+  ) %>%
+  select(-min_conc)  # remove helper column
+
+
+```
 
 ```{r}
 
@@ -197,10 +270,21 @@ We do the same for season.
 # From these compounds, only PFOS exists in the canary target screening data.
 
 
-RSN_MS$cens <- ifelse(
+# Prior to model need to add when compounds were sampled for and not found to not bias GAM.
+
+# Select sample dates
+# apply conditional rule whereby compounds sampled for but not detected are added to the RSN sampled data. with a new minimal value 
+# e.g. logConc(min(RSN_MS$Concentration)/10000)
+# Apply that to the cens var
+
+
+# List all compounds 
+    
+
+RRSN_MS$cens <- ifelse(
                       LCGC_Lib == 'Detected',
-                      mod_dat$trans_response,
-                      transform_response(min(mod_dat$response)/10000)
+                      logConc,
+                      logConc(min(RSN_MS$Concentration)/10000)
                     ) 
 
 mod1 <- RSN_MS %>%
