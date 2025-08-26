@@ -27,6 +27,7 @@ library(sf)
 library(magrittr)
 library(lme4)
 library(tidylog)
+library(mgcv)
 
 # Function which reads tsv
   readtsv <- function(filepath){
@@ -132,7 +133,7 @@ The below plot shows the seasonal variation in the log of concentration for all 
 # Visualise   
  
   
-  RSN_MS$season <- factor(RSN_MS$season, levels = c("Winter", "Spring", "Summer", "Autumn"))
+ RSN_MS$season <- factor(RSN_MS$season, levels = c("Winter", "Spring", "Summer", "Autumn"))
   
  plt <-  ggplot(RSN_MS, aes(x = season, y =logConc, fill=season))+
     geom_violin() + geom_boxplot(width=0.3)+labs(title = "Concentraion by Season")
@@ -207,19 +208,13 @@ compound_start <- LCGC_Lib %>%
   ) %>%
   ungroup() %>%
   mutate(
-    start_date = if_else(is.infinite(start_date), ymd("1900-01-01"), start_date)
+    start_date = if_else(is.infinite(start_date), ymd("2000-01-01"), start_date)
   ) %>%
   select(Compound_Name, start_date)
 
-# 2. Filter site of interest
-site_id <- "RSN0018"
-site_dates <- RSN_MS %>%
-  filter(Sample_Site_ID == site_id) %>%
-  distinct(Date)
-
 # 3. Full grid: all sampled-for compounds × all dates at this site
 full_grid <- compound_start %>%
-  crossing(site_dates) %>%
+  crossing(Date) %>%
   mutate(Sample_Site_ID = site_id)
 
 # 4. Join actual measurements
@@ -280,14 +275,38 @@ RSN_MS_full <- RSN_MS_full %>%
 
 # List all compounds 
     
+RSN_MS_full$rsn_id_fact <- as.factor(RSN_MS_full$Sample_Site_ID)
 
-RRSN_MS$cens <- ifelse(
-                      LCGC_Lib == 'Detected',
-                      logConc,
-                      logConc(min(RSN_MS$Concentration)/10000)
-                    ) 
+RSN_MS_full <- RSN_MS_full %>%
+  mutate(cens_ind = if_else(not_detected, 1, 0),
+         doy = yday(Date))
 
-mod1 <- RSN_MS %>%
+
+mod1 <- gam(
+  cbind(logConc, cens_ind) ~ 
+
+ # Include differences for each year - this will calculate a separate mean level for each
+
+    year +
+
+# Include a random intercept term corresponding to each site
+# This accounts for additional, nuisance variability at the site level 
+    s(rsn_id_fact, bs = "re") +
+
+# Include the seasonality smoothly varying term we used earlier
+    s(doy, bs = "cc", k = 12) +
+
+# Include a 2 dimension smoothly varying term over space to account for broad scale spatial differences
+# this uses a tensor product smooth with gam, which is more appropriate for this type of 2d smoothing
+           
+    te(SMPT_EASTING, SMPT_NORTHING),
+
+  family = cnorm(link = "identity"),
+  data = RSN_MS_full
+)
+
+
+mod1 <- RSN_MS_full %>%
               gam(matrix(c(logConc, cens, ncol=2)~1 + year + s(rsn_id_fact, bs='re') + 
               s(doy, bs='cc', k=12) +
               te(SMPT_EASTING, SMPT_NORTHING) + 
