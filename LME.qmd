@@ -21,13 +21,15 @@ Environmental monitoring data is typically not normally distributed and site sel
 #| code-fold: true
 
 library(tidyverse)
-library(skimr)
+require(skimr)
 library(leaflet)
+require(leaflet.extras)
 library(sf)
 library(magrittr)
 library(lme4)
-library(tidylog)
+require(tidylog)
 library(mgcv)
+require(MetBrewer)
 
 # Function which reads tsv
   readtsv <- function(filepath){
@@ -89,7 +91,15 @@ library(mgcv)
                month %in% c(9,10,11) ~ "Autumn",
                month %in% c(12,1,2) ~ "Winter"),
       logConc = log(Concentration)
-    )
+    ) %>% 
+      group_by(Compound_Name) %>% 
+      mutate(
+        norm_logconc = scale(logConc)
+      ) %>% 
+      ungroup()
+    
+
+
 ```
 
 
@@ -127,7 +137,7 @@ We will first explore whether our concentration data is normally distributed, as
 
 
 ## Temporal and Spatial Variation
-The below plot shows the seasonal variation in the log of concentration for all compounds through the seasons- summer and autumn have a median concentration higher than winter and spring. This shows there is a temporal variation in concentration of all compounds when grouped together. 
+The below plot shows the seasonal variation in the normalised log of concentration for all compounds through the seasons- summer and autumn have a median concentration higher than winter and spring. This shows there is a temporal variation in concentration of all compounds when grouped together. 
 
 ```{r, EDA}
 # Visualise   
@@ -135,13 +145,11 @@ The below plot shows the seasonal variation in the log of concentration for all 
   
  RSN_MS$season <- factor(RSN_MS$season, levels = c("Winter", "Spring", "Summer", "Autumn"))
   
- plt <-  ggplot(RSN_MS, aes(x = season, y =logConc, fill=season))+
+ plt <-  ggplot(RSN_MS, aes(x = season, y =norm_logconc, fill=season))+
     geom_violin() + geom_boxplot(width=0.3)+labs(title = "Concentraion by Season")
 
  plotly::ggplotly(plt)
 ```
-
-`
 
 The below heatmap shows the spatial variation of concentration for all compounds within England. This map shows there is temporal variation.  
 
@@ -185,8 +193,102 @@ Below we use a random effect mixed model, whereby we let each site have a random
 
 We do the same for season.
 
+```{r, LMM}
+#| code-fold: true
+
+lme1 <- RSN_MS %>% 
+      filter(Compound_Name == "Perfluorooctane sulfonate (PFOS)") %>% 
+      lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1| season), data =.)
+
+
+  
+ # residuals explains more than spatial or temporal - what we can't account for. 
+ # Spaital explains ~double the amount of variance than temporal. 
+ # lets try month instead of season to bring the residuals down and explain the intra-season varation better.
+ # explains marginally more. So seasons is good enough, our residuals still stay high when 
+ # we account for variance between months.
+ 
+ plot(fitted(lme1), resid(lme1))
+ abline(h = 0, col="red")
+ # some heteroscadacity 
+ 
+ qqnorm(resid(lme1))
+ qqline(resid(lme1), col="red")
+ 
+ 
+ plot(fitted(lme2), resid(lme2))
+ abline(h = 0, col="red")
+ # some heteroscadacity 
+ 
+ qqnorm(resid(lme2))
+ qqline(resid(lme2), col="red")
+ 
+```
+
+The model here shows that sites explain more variance from mean log(concentration) than seasons. but that our model fit is quite poor because we have high residuals - variance during the season and between sites is high. 
+
+We also have heterscadacity on our model which shows it's biased independence?
+
+
+```{r,}
+# test for between month 
+#| code-fold: true
+lme2 <- RSN_MS %>% 
+      filter(Compound_Name == "Perfluorooctane sulfonate (PFOS)") %>% 
+      lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1| month), data =.)
+ 
+```
+
+Month explains slightly more variance than seasonally but is still less than spatial variance. 
+
+```{r, anova model comparison}
+#| code-fold: true
+
+anova(lme1, lme2)
+```
+
+
+```
+Ibuprofen shows little variance between season and month, but more variance in concentration is captured by spatial variation.
+
+```{r, Ibuprofen}
+
+lmeI <- RSN_MS %>% 
+      filter(Compound_Name == "Ibuprofen") %>%   
+      lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1| season/month), data =.)   # test for within season varation, nesting. 
+      
+summary(lmeI)
+
+
+lmeII <- RSN_MS %>% 
+      filter(Compound_Name == "Ibuprofen") %>%   
+      lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1| season), data =.) 
+
+summary(lmeII)
+
+lmeI <- RSN_MS %>% 
+      filter(Compound_Name == "Ibuprofen") %>% 
+      lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1| month), data =.)
+      
+
+summary(lmeI)
+      
+```
+
+
 
 ## Selecting Compounds to represent wider dataset
+
+ Isolate to 4 compounds to test:
+ 
+# Bioavailable zinc (det code 4822)
+# Perfluorooctanesulphonate anion (PFOS) (det code 9276)
+# Cypermethrin (det code 0073)
+# Tributyltin (TBT) (det code 8944)
+# 17-alpha-ethinyloestradiol (EE2) (det code 9899)
+
+From these compounds, only PFOS exists in the canary target screening data.
+
 
 Sources: 
 
@@ -194,12 +296,14 @@ Pathways:
 
 Receptors: 
 
-```{r}
-library(dplyr)
-library(tidyr)
-library(lubridate)
+```{r, clustering to identify groups of chemicals}
 
-# 1. Start dates for compounds
+```
+
+
+```{r, transforms }
+
+# Calc Start dates for compounds
 compound_start <- LCGC_Lib %>%
   mutate(across(c(Added_LC, Added_GC), ymd)) %>%
   rowwise() %>%
@@ -212,12 +316,12 @@ compound_start <- LCGC_Lib %>%
   ) %>%
   select(Compound_Name, start_date)
 
-# 3. Full grid: all sampled-for compounds × all dates at this site
+# Full grid: all sampled-for compounds × all dates at this site
 full_grid <- compound_start %>%
   crossing(Date) %>%
   mutate(Sample_Site_ID = site_id)
 
-# 4. Join actual measurements
+# Join measurements
 RSN_MS_full <- full_grid %>%
   left_join(RSN_MS, by = c("Compound_Name", "Date", "Sample_Site_ID")) %>%
   mutate(
@@ -228,12 +332,12 @@ RSN_MS_full <- full_grid %>%
     )
   )
 
-# 1. Compute compound-specific minimums
+Compute compound-specific minimums
 compound_mins <- RSN_MS %>%
   group_by(Compound_Name) %>%
   summarise(min_conc = min(Concentration, na.rm = TRUE) / 10000, .groups = "drop")
 
-# 2. Fill in non-detected concentrations and compute logConc per compound
+#Fill in non-detected concentrations and compute logConc per compound
 RSN_MS_full <- RSN_MS_full %>%
   left_join(compound_mins, by = "Compound_Name") %>%
   mutate(
@@ -248,22 +352,13 @@ RSN_MS_full <- RSN_MS_full %>%
       logConc
     )
   ) %>%
-  select(-min_conc)  # remove helper column
+  select(-min_conc)  # remove column
 
 
 ```
 
 ```{r}
-
-# Isolate to 4 compounds to test
-#Bioavailable zinc (det code 4822)
-#Perfluorooctanesulphonate anion (PFOS) (det code 9276)
-#Cypermethrin (det code 0073)
-#Tributyltin (TBT) (det code 8944)
-#17-alpha-ethinyloestradiol (EE2) (det code 9899)
-
 # From these compounds, only PFOS exists in the canary target screening data.
-
 
 # Prior to model need to add when compounds were sampled for and not found to not bias GAM.
 
@@ -317,60 +412,6 @@ summary(mod1)
 gam.check(mod1)
 dev.off()
 ```
-
-
-```{r, LMM}
-#| code-fold: true
-
- lme1 <- lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1| season), data=RSN_MS)
-  summary(lme1)
- # residuals explains more than spatial or temporal - what we can't account for. 
- # Spaital explains ~double the amount of variance than temporal. 
- # lets try month instead of season to bring the residuals down and explain the intra-season varation better.
- # explains marginally more. So seasons is good enough, our residuals still stay high when 
- # we account for variance between months.
- 
- plot(fitted(lme1), resid(lme8))
- abline(h = 0, col="red")
- # some heteroscadacity 
- 
- qqnorm(resid(lme1))
- qqline(resid(lme1), col="red")
- 
- 
-```
-
-The model here shows that sites explain more variance from mean log(concentration) than seasons. but that our model fit is quite poor because we have high residuals - variance during the season and between sites is high. 
-
-We also have heterscadacity on our model which shows it's biased independence?
-
-
-```{r,}
-# test for between month 
-#| code-fold: true
- lme2 <- lme4::lmer(logConc ~ (1| Sample_Site_ID) + (1 | month), data = RSN_MS)
- summary(lme2)
- 
-```
-
-Month explains slightly more variance than seasonally but is still less than spatial variance. 
-
-```{r, anova model comparison}
-#| code-fold: true
-
-anova(lme1, lme2)
-```
-
-
-
-
-
-
-
-
-
-
-
 
 
 
