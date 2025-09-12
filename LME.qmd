@@ -62,14 +62,19 @@ require(MetBrewer)
 ```
 
 
+
+
+
 ```{r, transforms}  
 #| code-fold: true
 
 # Transform 
  # names(LCMS_Open_Tgt)==names(GCMS_Open_Tgt) check colnames are the same before rbind
-  
+  Open_Lib <- rbind(EA_NLS_Target_LCMS, EA_NLS_Target_GCMS)
+
 # Merge LCMS & GCMS data into one dataframe
   Open_Tgt <- rbind(LCMS_Open_Tgt, GCMS_Open_Tgt)
+  
   
 # Convert to sf for leaflet map later
   Open_Tgt_sf <- Open_Tgt %>% st_as_sf(coords = c("Longitude","Latitude"), crs=4326)
@@ -81,7 +86,8 @@ require(MetBrewer)
 # Select scans sites from RSN network only  
   RSN_MS <-  Open_Tgt_sf %>% 
     filter(str_detect(Sample_Site_ID, "RSN"))
-  
+
+    
     RSN_MS %<>% 
     mutate(
       month = as.factor(month(Sample_datetime)),
@@ -94,10 +100,40 @@ require(MetBrewer)
     ) %>% 
       group_by(Compound_Name) %>% 
       mutate(
-        norm_logconc = scale(logConc)
+        norm_logconc = scale(logConc),
+        norm_conc = scale(Concentration)
       ) %>% 
       ungroup()
     
+```
+
+
+```{r}
+
+install.packages("wordcloud2")
+install.packages("MetBrewer")
+library(wordcloud2)
+
+pal1 <- MetBrewer::met.brewer("Monet",612)
+
+RSN_MS %>% 
+  count(Compound_Name) %>% 
+  rename(freq = n) %>% 
+  arrange(desc(freq)) %>% 
+  wordcloud2(., size = 1.5, color = pal, backgroundColor = "white")
+
+
+```
+```{r}
+
+
+pal2 <- MetBrewer::met.brewer("Monet",25)
+
+Open_Lib %>% 
+  count(USE) %>% 
+  rename(freq = n) %>% 
+  arrange(desc(freq)) %>% 
+  wordcloud2(., size = 1.5, color = pal, backgroundColor = "white")
 
 
 ```
@@ -114,6 +150,7 @@ We will first explore whether our concentration data is normally distributed, as
 ```{r, conc data}
 #| warning: false
 #| echo: false
+#| eval: false
 
  # Observe concentration normality- large right tail
   ggplot(RSN_MS, aes(x = Concentration)) +
@@ -127,6 +164,7 @@ We will first explore whether our concentration data is normally distributed, as
 ```{r, log conc}
 #| warning: false
 #| echo: false
+#| eval: false
   
   ggplot(RSN_MS, aes(x = logConc)) +
     geom_histogram(aes(y = ..density..), bins = 50) +
@@ -215,13 +253,7 @@ lme1 <- RSN_MS %>%
  qqnorm(resid(lme1))
  qqline(resid(lme1), col="red")
  
- 
- plot(fitted(lme2), resid(lme2))
- abline(h = 0, col="red")
- # some heteroscadacity 
- 
- qqnorm(resid(lme2))
- qqline(resid(lme2), col="red")
+
  
 ```
 
@@ -240,13 +272,6 @@ lme2 <- RSN_MS %>%
 ```
 
 Month explains slightly more variance than seasonally but is still less than spatial variance. 
-
-```{r, anova model comparison}
-#| code-fold: true
-
-anova(lme1, lme2)
-```
-
 
 ```
 Ibuprofen shows little variance between season and month, but more variance in concentration is captured by spatial variation.
@@ -298,9 +323,60 @@ Receptors:
 
 ```{r, clustering to identify groups of chemicals}
 
+
+RSN_k2 <- RSN_k %>%
+  st_drop_geometry() %>%           # drop sf geometry
+  select(norm_conc, Sample_Site_ID, SMC_DESC, season) %>%
+  mutate(
+    norm_conc = as.numeric(norm_conc),   # convert from 1-column matrix to numeric
+    Sample_Site_ID = as.factor(Sample_Site_ID),
+    SMC_DESC = as.factor(SMC_DESC),
+    season = as.factor(season)
+  )
+
+# compute Gower distance
+gower_dist <- cluster::daisy(RSN_k2, metric = "gower")
+
+
+# Classical MDS to convert distance matrix to numeric coordinates
+mds_coords <- cmdscale(gower_dist, k = 5)  # k dimensions (can tune)
+
+# SRun k-means on MDS coordinates
+set.seed(123)
+k <- 10
+km <- kmeans(mds_coords, centers = k)
+
+# Attach cluster info
+RSN_k$cluster <- km$cluster
+
+# Pick representative compound per cluster
+representatives <- RSN_k %>%
+  mutate(row_id = row_number()) %>%
+  group_by(cluster) %>%
+  summarise(
+    representative = row_id[which.min(rowSums((mds_coords[row_id, ] - km$centers[cluster[1], ])^2))]
+  ) %>%
+  left_join(RSN_k, by = c("representative" = "row_id")) %>%
+  select(cluster, Compound_Name = Compound_Name)
+
+# Optional 2D visualization using first 2 MDS dimensions
+tsne_df <- data.frame(
+  X = mds_coords[,1],
+  Y = mds_coords[,2],
+  cluster = factor(RSN_k$cluster),
+  Compound_Name = RSN_MS$Compound_Name[!is.na(RSN_MS$norm_conc)]
+)
+
+ggplot(tsne_df, aes(x = X, y = Y, color = cluster)) +
+  geom_point(alpha = 0.7) +
+  geom_text(data = tsne_df[tsne_df$Compound_Name %in% representatives$Compound_Name, ],
+            aes(label = Compound_Name),
+            color = "black", vjust = -0.5, size = 3) +
+  theme_minimal() +
+  labs(title = "K-means clustering on Gower distance (mixed data)")
+
 ```
-
-
+  
 ```{r, transforms }
 
 # Calc Start dates for compounds
@@ -332,7 +408,7 @@ RSN_MS_full <- full_grid %>%
     )
   )
 
-Compute compound-specific minimums
+#Compute compound-specific minimums
 compound_mins <- RSN_MS %>%
   group_by(Compound_Name) %>%
   summarise(min_conc = min(Concentration, na.rm = TRUE) / 10000, .groups = "drop")
